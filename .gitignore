@@ -1,8 +1,2 @@
 /target
 
-# Raw OSM tile dumps from Overpass Turbo. Large (~150 MB total) and
-# regenerable; the extractor in tools/extract_osm.py produces
-# src/osm_data.rs from them, and that generated file is what the build
-# actually compiles against.
-tools/*.json
-

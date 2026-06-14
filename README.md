@@ -10,14 +10,64 @@ Started as a port of `reference/e8-shinkansen-tokyo.html` (a single-file
 Three.js demo) and grew from there. The reference HTML is still in the repo
 for visual comparison.
 
-## Quick start
+## Running the game
+
+### What you need
+
+- A Rust toolchain. Install via [rustup](https://rustup.rs/) if you don't
+  have it: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`.
+  Any recent stable Rust (1.74+) works.
+- Linux/macOS/Windows. On Linux you'll also need the usual ALSA / X11
+  development headers for Bevy:
+
+  ```bash
+  # Debian / Ubuntu
+  sudo apt install libasound2-dev libudev-dev pkg-config
+
+  # Arch
+  sudo pacman -S alsa-lib libxkbcommon
+
+  # Fedora
+  sudo dnf install alsa-lib-devel systemd-devel libxkbcommon-devel
+  ```
+- A GPU that can do Vulkan / Metal / DX12 — anything from the last ~10
+  years. The scene has ~130k buildings + the viaduct + a 3D train model
+  so an integrated GPU will work but will hitch in dense parts of Tokyo.
+
+### Run
 
 ```bash
+git clone https://github.com/<you>/Shinkansen-sim.git
+cd Shinkansen-sim
 cargo run --release
 ```
 
-The first build pulls Bevy + dependencies (large). After that, `cargo run`
-is fine for iteration.
+The first build takes a while — Bevy is a large dependency tree and the
+generated `src/osm_data.rs` is ~31 MB of `&[(f32, f32)]` literals. Expect
+5–15 minutes on a laptop. Subsequent builds are seconds.
+
+You can also do `cargo run` (debug build) for faster iteration; the scene
+runs ~30 FPS in debug, ~60–120 FPS in release.
+
+The window opens directly into the cab in front of Tokyo Station — tap W
+once to engage the throttle and you're off.
+
+### Optional: regenerate the OSM city
+
+The full OSM tile dumps are committed under `tools/` (about 115 MB total),
+so the game compiles and runs out of the box without any external setup.
+If you want to refresh the data or change the bbox covered, you can re-run
+the extractor:
+
+```bash
+python3 tools/extract_osm.py
+```
+
+It reads every `tools/*.json` file (dedupes by OSM `@id`), classifies each
+building from area + tagged height, and rewrites `src/osm_data.rs`. To
+change the area covered, edit `TILE_BBOXES` in `extract_osm.py`, re-export
+the matching GeoJSON tiles from https://overpass-turbo.eu (one query per
+bbox), and re-run the script.
 
 ## Controls
 
@@ -90,22 +140,22 @@ tools/
 
 ## Data pipeline (OSM city)
 
-The city geometry isn't shipped with the game — it's generated from raw
-Overpass Turbo dumps that live in `tools/*.json` (gitignored, ~150 MB).
+The city geometry is baked into `src/osm_data.rs` (~31 MB of `&[(f32, f32)]`
+literals) from raw Overpass Turbo dumps in `tools/*.json` (~115 MB). Both
+the dumps and the generated Rust file are committed so the game compiles
+and runs out of the box.
 
-To regenerate `src/osm_data.rs`:
+To regenerate the city — change the area covered, refresh stale OSM data,
+or add new tiles:
 
-1. Open https://overpass-turbo.eu and run the queries in
-   `tools/extract_osm.py` (`TILE_BBOXES` lists the bboxes; one query per
-   tile, exported as GeoJSON).
-2. Save each export to `tools/<name>.json`.
-3. `python3 tools/extract_osm.py` — merges all `*.json` in `tools/` (deduped
-   by OSM `@id`), classifies buildings by area + tagged height, and emits
-   `src/osm_data.rs` (~31 MB Rust file with the bake-in data).
-4. `cargo build` to recompile against the new data.
-
-Only `src/osm_data.rs` and `tools/extract_osm.py` are committed. The raw
-JSON tiles aren't, since they're regenerable.
+1. Edit `TILE_BBOXES` in `tools/extract_osm.py` if you want a new bbox.
+2. Open https://overpass-turbo.eu and run a query per bbox (the script's
+   docstring has the Overpass query template). Export each as GeoJSON.
+3. Save each export to `tools/<name>.json`.
+4. `python3 tools/extract_osm.py` — merges every `*.json` in `tools/`,
+   dedupes by OSM `@id`, classifies buildings by area + tagged height,
+   and rewrites `src/osm_data.rs`.
+5. `cargo build` to recompile against the new data.
 
 ## Known TODOs
 
