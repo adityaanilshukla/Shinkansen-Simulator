@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use bevy::render::view::VisibilityRange;
 
 use crate::route::CorridorMask;
+use crate::tokyo::OsmWaters;
 use crate::water::WaterMask;
 
 const TREE_COUNT: usize = 1_200;
@@ -28,6 +29,7 @@ fn spawn_trees(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     water: Res<WaterMask>,
+    osm_waters: Res<OsmWaters>,
     corridor: Res<CorridorMask>,
 ) {
     let trunk_mesh = meshes.add(Cylinder {
@@ -85,7 +87,7 @@ fn spawn_trees(
         let x = rng.f32() * (BOUNDS_X.1 - BOUNDS_X.0) + BOUNDS_X.0;
         let z = rng.f32() * (BOUNDS_Z.1 - BOUNDS_Z.0) + BOUNDS_Z.0;
 
-        if water.in_bay(x, z) || water.near_river(x, z, 4.0) {
+        if water.in_bay(x, z) || water.near_river(x, z, 4.0) || osm_waters.in_water(x, z) {
             continue;
         }
         if corridor.near_track(x, z) {

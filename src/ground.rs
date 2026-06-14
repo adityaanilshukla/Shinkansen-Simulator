@@ -1,4 +1,11 @@
 //! Flat ground plane under everything.
+//!
+//! TODO(ground-color): an earlier procedural-noise texture pass kept reading
+//! as blue regardless of the ambient/sun setup. For now we draw the ground
+//! as a plain warm-tan plane; revisit when we know what's actually tinting
+//! it. Leads to investigate: linear-vs-sRGB conversion of the AmbientLight
+//! `color` field, the sky dome's emissive contribution at low view angles,
+//! and the lack of any toneMapping override on this material.
 
 use bevy::prelude::*;
 
@@ -18,7 +25,7 @@ fn spawn_ground(
     commands.spawn(PbrBundle {
         mesh: meshes.add(Plane3d::default().mesh().size(40_000.0, 60_000.0)),
         material: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.67, 0.69, 0.66),
+            base_color: Color::srgb(0.66, 0.58, 0.42),
             perceptual_roughness: 0.95,
             metallic: 0.0,
             ..default()

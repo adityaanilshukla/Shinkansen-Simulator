@@ -55,11 +55,14 @@ fn main() {
             ground::GroundPlugin,
             water::WaterPlugin,
             landmarks::LandmarksPlugin,
-            track::TrackPlugin,
+            // StationsPlugin must come before TrackPlugin: spawn_track reads
+            // Res<Stations>.list to suppress catenary masts inside station
+            // envelopes, and Stations is populated in its Startup system.
             stations::StationsPlugin,
             roads::RoadsPlugin,
-            lamps::LampsPlugin,
             tokyo::TokyoPlugin,
+            track::TrackPlugin,
+            lamps::LampsPlugin,
             trees::TreesPlugin,
             train::TrainPlugin,
         ))

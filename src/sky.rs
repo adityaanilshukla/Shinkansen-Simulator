@@ -14,9 +14,12 @@ pub struct SkyPlugin;
 impl Plugin for SkyPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(Color::srgb(0.82, 0.92, 0.97)))
+            // Dim and slightly warm ambient. Lower brightness lets the warm
+            // directional sun dominate the look so surfaces no longer read
+            // as blue-tinged.
             .insert_resource(AmbientLight {
-                color: Color::srgb(0.85, 0.90, 0.98),
-                brightness: 1400.0,
+                color: Color::srgb(0.98, 0.94, 0.86),
+                brightness: 500.0,
             })
             .add_systems(Startup, spawn_sky)
             .add_systems(Update, follow_camera);
