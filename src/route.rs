@@ -76,7 +76,10 @@ pub fn build_route() -> Route {
 }
 
 fn build_corridor_mask(route: &Route) -> CorridorMask {
-    let cell_size = 12.0;
+    // ~18 m radius. Covers the modelled viaduct deck (5 m half-width each
+    // side) plus a route-approximation buffer (8-13 m) without leaving a
+    // wide empty corridor through the city.
+    let cell_size = 6.0;
     let radius_cells = 3;
     let r2 = radius_cells * radius_cells;
     let mut cells = HashSet::new();

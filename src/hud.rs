@@ -180,13 +180,21 @@ fn update_hud(
     }
     if let Ok(mut t) = dir_q.get_single_mut() {
         if let Some(section) = t.sections.get_mut(0) {
-            section.value = if state.speed > 0.5 {
-                "FORWARD".to_string()
+            let dir = if state.speed > 0.5 {
+                "FORWARD"
             } else if state.speed < -0.5 {
-                "REVERSE".to_string()
+                "REVERSE"
+            } else if state.forward_dir < 0.0 {
+                "STOPPED REV"
             } else {
-                "STOPPED".to_string()
+                "STOPPED FWD"
             };
+            let lever = match state.throttle_level {
+                0 => "IDLE".to_string(),
+                n if n > 0 => format!("PWR +{}", n),
+                n => format!("BRK -{}", n.abs()),
+            };
+            section.value = format!("{}  |  {}", dir, lever);
         }
     }
     if let Ok(mut s) = bar_q.get_single_mut() {

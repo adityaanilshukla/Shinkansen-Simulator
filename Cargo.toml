@@ -7,6 +7,7 @@ description = "E8 Shinkansen Tokyo Drive (Rust/bevy port)"
 [dependencies]
 bevy = { version = "0.14", features = ["wav"] }
 fastrand = "2"
+earcutr = "0.4"
 
 [profile.dev]
 opt-level = 1

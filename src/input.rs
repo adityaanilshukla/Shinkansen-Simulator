@@ -51,14 +51,11 @@ fn read_keys(
     controls.left = keys.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]);
     controls.right = keys.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]);
 
-    if keys.just_pressed(KeyCode::KeyC) {
-        // Flip the camera to look the other way down the train.
-        if controls.orbit_yaw.abs() > std::f32::consts::FRAC_PI_2 {
-            controls.orbit_yaw = 0.0;
-        } else {
-            controls.orbit_yaw = std::f32::consts::PI;
-        }
+    // V resets the orbit / zoom to the default chase view.
+    if keys.just_pressed(KeyCode::KeyV) {
+        controls.orbit_yaw = 0.0;
         controls.orbit_pitch = 0.0;
+        controls.zoom = 1.0;
     }
     if keys.just_pressed(KeyCode::Escape) {
         exit.send(AppExit::Success);

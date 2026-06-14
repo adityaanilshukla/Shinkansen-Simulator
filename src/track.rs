@@ -1,9 +1,15 @@
 //! Elevated viaduct, rails, piers, and catenary.
 //!
-//! Instead of one entity per 0.6 m of track (which gave ~13 k entities for the
-//! viaduct alone), the deck/slab/walls/rails/piers/caps are merged into chunks
-//! of `CHUNK_SIZE` segments. Each chunk is a single mesh entity positioned at
-//! the chunk's centroid, so `VisibilityRange` can cull distant track properly.
+//! Each segment of the track is drawn as a set of overlapping boxes (deck,
+//! slab, rail walls, rails) along the spline. Adjacent boxes overlap by 5 m
+//! to mask the per-segment rotation gap on curves. The boxes are merged into
+//! one mesh per chunk so the scene stays at a few hundred draw calls.
+//!
+//! TODO(track-gaps): On very tight curves a thin sliver gap can still appear
+//! between adjacent boxes' outer-corner edges. A continuous ribbon strip
+//! would fix this categorically; an earlier attempt at one had a winding bug
+//! that caused back-face culling artefacts that looked like jitter, so the
+//! box approach is what's shipped while that's redone properly.
 
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
@@ -15,6 +21,7 @@ use crate::route::{Route, DECK_Y};
 const SEG_COUNT: usize = 1600;
 const CHUNK_SIZE: usize = 50;
 const CHUNKS: usize = SEG_COUNT / CHUNK_SIZE;
+const PIER_STEP: usize = 2;
 const VIS_DETAIL: f32 = 600.0;
 
 pub struct TrackPlugin;
@@ -61,7 +68,6 @@ fn spawn_track(
         metallic: 0.4,
         ..default()
     });
-
     let mast_mesh = meshes.add(Cylinder {
         radius: 0.15,
         half_height: 2.9,
@@ -90,12 +96,9 @@ fn spawn_track(
             let nor = Vec3::new(tan.z, 0.0, -tan.x).normalize_or_zero();
             let rot = Quat::from_rotation_y(tan.x.atan2(tan.z));
 
-            // Box length overlap: pad each segment by `seg_len + OVERLAP` so
-            // consecutive boxes meaningfully overlap on curves, where their
-            // orientations rotate and the unpadded ends would diverge.
-            let overlap_deck = seg_len + 2.5;
-            let overlap_wall = seg_len + 2.5;
-            let overlap_rail = seg_len + 2.0;
+            let overlap_deck = seg_len + 5.0;
+            let overlap_wall = seg_len + 5.0;
+            let overlap_rail = seg_len + 4.0;
 
             deck.append_box(
                 p + Vec3::new(0.0, -0.7, 0.0),
@@ -118,7 +121,7 @@ fn spawn_track(
             rails.append_box(rleft, rot, Vec3::new(0.16, 0.24, overlap_rail));
             rails.append_box(rright, rot, Vec3::new(0.16, 0.24, overlap_rail));
 
-            if i % 2 == 0 {
+            if i % PIER_STEP == 0 {
                 piers.append_box(
                     p + Vec3::new(0.0, 5.9 - DECK_Y, 0.0),
                     Quat::IDENTITY,
@@ -140,10 +143,9 @@ fn spawn_track(
         spawn_chunk(&mut commands, &mut meshes, caps, concrete.clone(), chunk_center);
     }
 
-    // Catenary masts + arms stay as individual entities (the cylinder is hard
-    // to merge cheaply) but only render up close.
+    // Catenary masts + arms stay individual entities, but only render up close.
     for i in 0..SEG_COUNT {
-        if i % 2 != 0 {
+        if i % PIER_STEP != 0 {
             continue;
         }
         let t = (i as f32 + 0.5) / SEG_COUNT as f32;
@@ -172,7 +174,7 @@ fn spawn_track(
                 transform: Transform::from_xyz(
                     p.x + nor.x * 2.7,
                     DECK_Y + 5.35,
-                    p.z + nor.z * 2.7,
+                    p.z + nor.z * 5.4,
                 )
                 .with_rotation(rot),
                 ..default()
@@ -192,10 +194,6 @@ fn spawn_chunk(
     if buf.is_empty() {
         return;
     }
-    // No `VisibilityRange` on the viaduct chunks: with their centroids ~1.25 km
-    // apart, distance-based culling would pop adjacent chunks in at different
-    // times and leave a visible gap. The merged geometry is small (~6k tris
-    // per chunk) and fog already fades the far distance.
     commands.spawn(PbrBundle {
         mesh: meshes.add(buf.into_mesh()),
         material,
@@ -204,8 +202,6 @@ fn spawn_chunk(
     });
 }
 
-/// Accumulator for chunk geometry. Each box is expanded into 6 flat-shaded
-/// faces with their own normals so adjacent boxes don't smooth into each other.
 struct MeshBuf {
     positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
@@ -232,60 +228,42 @@ impl MeshBuf {
         let hy = size.y * 0.5;
         let hz = size.z * 0.5;
         let faces: [(Vec3, [Vec3; 4]); 6] = [
-            (
-                Vec3::Y,
-                [
-                    Vec3::new(-hx, hy, -hz),
-                    Vec3::new(hx, hy, -hz),
-                    Vec3::new(hx, hy, hz),
-                    Vec3::new(-hx, hy, hz),
-                ],
-            ),
-            (
-                Vec3::NEG_Y,
-                [
-                    Vec3::new(-hx, -hy, hz),
-                    Vec3::new(hx, -hy, hz),
-                    Vec3::new(hx, -hy, -hz),
-                    Vec3::new(-hx, -hy, -hz),
-                ],
-            ),
-            (
-                Vec3::X,
-                [
-                    Vec3::new(hx, -hy, -hz),
-                    Vec3::new(hx, -hy, hz),
-                    Vec3::new(hx, hy, hz),
-                    Vec3::new(hx, hy, -hz),
-                ],
-            ),
-            (
-                Vec3::NEG_X,
-                [
-                    Vec3::new(-hx, -hy, hz),
-                    Vec3::new(-hx, -hy, -hz),
-                    Vec3::new(-hx, hy, -hz),
-                    Vec3::new(-hx, hy, hz),
-                ],
-            ),
-            (
-                Vec3::Z,
-                [
-                    Vec3::new(hx, -hy, hz),
-                    Vec3::new(-hx, -hy, hz),
-                    Vec3::new(-hx, hy, hz),
-                    Vec3::new(hx, hy, hz),
-                ],
-            ),
-            (
-                Vec3::NEG_Z,
-                [
-                    Vec3::new(-hx, -hy, -hz),
-                    Vec3::new(hx, -hy, -hz),
-                    Vec3::new(hx, hy, -hz),
-                    Vec3::new(-hx, hy, -hz),
-                ],
-            ),
+            (Vec3::Y, [
+                Vec3::new(-hx, hy, -hz),
+                Vec3::new(hx, hy, -hz),
+                Vec3::new(hx, hy, hz),
+                Vec3::new(-hx, hy, hz),
+            ]),
+            (Vec3::NEG_Y, [
+                Vec3::new(-hx, -hy, hz),
+                Vec3::new(hx, -hy, hz),
+                Vec3::new(hx, -hy, -hz),
+                Vec3::new(-hx, -hy, -hz),
+            ]),
+            (Vec3::X, [
+                Vec3::new(hx, -hy, -hz),
+                Vec3::new(hx, -hy, hz),
+                Vec3::new(hx, hy, hz),
+                Vec3::new(hx, hy, -hz),
+            ]),
+            (Vec3::NEG_X, [
+                Vec3::new(-hx, -hy, hz),
+                Vec3::new(-hx, -hy, -hz),
+                Vec3::new(-hx, hy, -hz),
+                Vec3::new(-hx, hy, hz),
+            ]),
+            (Vec3::Z, [
+                Vec3::new(hx, -hy, hz),
+                Vec3::new(-hx, -hy, hz),
+                Vec3::new(-hx, hy, hz),
+                Vec3::new(hx, hy, hz),
+            ]),
+            (Vec3::NEG_Z, [
+                Vec3::new(-hx, -hy, -hz),
+                Vec3::new(hx, -hy, -hz),
+                Vec3::new(hx, hy, -hz),
+                Vec3::new(-hx, hy, -hz),
+            ]),
         ];
 
         for (face_normal, corners) in faces {

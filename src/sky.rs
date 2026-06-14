@@ -18,8 +18,26 @@ impl Plugin for SkyPlugin {
                 color: Color::srgb(0.85, 0.90, 0.98),
                 brightness: 1400.0,
             })
-            .add_systems(Startup, spawn_sky);
+            .add_systems(Startup, spawn_sky)
+            .add_systems(Update, follow_camera);
     }
+}
+
+/// The sky dome is a finite-radius sphere; if the camera leaves it the player
+/// sees the dome as an actual ball in the distance. Snap its centre to the
+/// camera each frame so it always wraps the view.
+fn follow_camera(
+    cam: Query<&Transform, (With<Camera3d>, Without<SkyDome>)>,
+    mut sky: Query<&mut Transform, With<SkyDome>>,
+) {
+    let Ok(cam_tf) = cam.get_single() else {
+        return;
+    };
+    let Ok(mut sky_tf) = sky.get_single_mut() else {
+        return;
+    };
+    sky_tf.translation.x = cam_tf.translation.x;
+    sky_tf.translation.z = cam_tf.translation.z;
 }
 
 fn spawn_sky(

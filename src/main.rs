@@ -5,24 +5,23 @@
 
 mod audio;
 mod camera;
-mod city;
-mod clusters;
 mod driver;
 mod geo;
 mod ground;
-mod houses;
 mod hud;
 mod input;
 mod lamps;
 mod landmarks;
 mod minimap;
 mod motion;
+mod osm_data;
 mod physics;
 mod roads;
 mod route;
 mod sky;
 mod spline;
 mod stations;
+mod tokyo;
 mod track;
 mod train;
 mod trees;
@@ -60,9 +59,7 @@ fn main() {
             stations::StationsPlugin,
             roads::RoadsPlugin,
             lamps::LampsPlugin,
-            clusters::ClustersPlugin,
-            city::CityPlugin,
-            houses::HousesPlugin,
+            tokyo::TokyoPlugin,
             trees::TreesPlugin,
             train::TrainPlugin,
         ))

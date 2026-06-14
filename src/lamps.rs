@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use bevy::render::view::VisibilityRange;
 
 use crate::roads::RoadMask;
+use crate::tokyo::{OsmBbox, OsmRoads};
 use crate::water::WaterMask;
 
 const LAMP_SPACING: f32 = 50.0;
@@ -30,6 +31,8 @@ fn spawn_lamps(
     mut materials: ResMut<Assets<StandardMaterial>>,
     roads: Res<RoadMask>,
     water: Res<WaterMask>,
+    osm: Res<OsmBbox>,
+    osm_roads: Res<OsmRoads>,
 ) {
     let pole_mesh = meshes.add(Cylinder {
         radius: 0.16,
@@ -80,6 +83,23 @@ fn spawn_lamps(
                 let lx = px + nx * off;
                 let lz = pz + nz * off;
 
+                // Inside the OSM extract the procedural arterials don't line
+                // up with the actual streets, so lamps placed there would land
+                // on buildings or the wrong side of a road. Real central Tokyo
+                // gets no procedural lamps; the OSM area is its own world.
+                if osm.contains(lx, lz) {
+                    side = -side;
+                    next += LAMP_SPACING;
+                    continue;
+                }
+                // And anywhere the lamp would land on an OSM road surface
+                // (including near the OSM bbox edge where the OSM data still
+                // bleeds out a bit) — no lamp.
+                if osm_roads.near(lx, lz, 1.5) {
+                    side = -side;
+                    next += LAMP_SPACING;
+                    continue;
+                }
                 if !water.in_bay(lx, lz) && !water.near_river(lx, lz, 3.0) {
                     commands.spawn((
                         PbrBundle {
