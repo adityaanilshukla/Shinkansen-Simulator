@@ -1,0 +1,19 @@
+[package]
+name = "shinkansen-sim"
+version = "0.1.0"
+edition = "2021"
+description = "E8 Shinkansen Tokyo Drive (Rust/bevy port)"
+
+[dependencies]
+bevy = { version = "0.14", features = ["wav"] }
+fastrand = "2"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
