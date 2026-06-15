@@ -1,9 +1,10 @@
 //! Procedural audio.
 //!
-//! A pink-noise loop stands in for wind + rumble + rail clatter. Its volume
-//! and playback rate are driven from the train's signed speed each frame, so
-//! the bed gets louder and brighter as you accelerate. The horn is a four-tone
-//! chord rendered to PCM at startup and played as a one-shot on H.
+//! A brown-noise rumble mixed with a thin pink texture and a 50 Hz traction
+//! hum stands in for wheels-on-rail + airflow + EMU motors. Volume scales
+//! with the train's speed; pitch stays close to fixed so the bed sounds like
+//! the same train growing louder, not a different one. The horn is a
+//! seamlessly-looping chord played for as long as H is held.
 
 use bevy::audio::{AudioSink, PlaybackMode, Volume};
 use bevy::prelude::*;
@@ -13,6 +14,9 @@ use crate::physics::{TrainState, V_MAX};
 #[derive(Component)]
 struct RunningBed;
 
+#[derive(Component)]
+struct HornVoice;
+
 #[derive(Resource)]
 struct HornHandle(Handle<AudioSource>);
 
@@ -21,7 +25,7 @@ pub struct AudioPlugin;
 impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_audio)
-            .add_systems(Update, (update_bed, trigger_horn));
+            .add_systems(Update, (update_bed, drive_horn));
     }
 }
 
@@ -42,7 +46,7 @@ fn setup_audio(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
             settings: PlaybackSettings {
                 mode: PlaybackMode::Loop,
                 volume: Volume::new(0.0),
-                speed: 0.5,
+                speed: 1.0,
                 ..default()
             },
         },
@@ -57,52 +61,83 @@ fn update_bed(state: Res<TrainState>, sinks: Query<&AudioSink, With<RunningBed>>
         return;
     };
     let frac = (state.speed.abs() / V_MAX).clamp(0.0, 1.0);
-    sink.set_volume(0.04 + frac * 0.55);
-    sink.set_speed(0.5 + frac * 1.7);
+    // Always-on quiet idle rumble; swells with speed. Pitch stays nearly
+    // constant so the texture reads as the same train running faster, not
+    // as a chipmunk-on-rails.
+    sink.set_volume(0.08 + frac * 0.34);
+    sink.set_speed(0.92 + frac * 0.18);
 }
 
-fn trigger_horn(
+fn drive_horn(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     horn: Res<HornHandle>,
+    voices: Query<Entity, With<HornVoice>>,
 ) {
     if keys.just_pressed(KeyCode::KeyH) {
-        commands.spawn(AudioBundle {
-            source: horn.0.clone(),
-            settings: PlaybackSettings {
-                mode: PlaybackMode::Despawn,
-                volume: Volume::new(0.7),
-                speed: 1.0,
-                ..default()
+        commands.spawn((
+            AudioBundle {
+                source: horn.0.clone(),
+                settings: PlaybackSettings {
+                    mode: PlaybackMode::Loop,
+                    volume: Volume::new(0.7),
+                    speed: 1.0,
+                    ..default()
+                },
             },
-        });
+            HornVoice,
+        ));
+    }
+    if keys.just_released(KeyCode::KeyH) {
+        for entity in &voices {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
-/// Two-second loopable pink-noise sample. Pink (1/f) noise has more body than
-/// pure white noise and reads as wind rather than as a hiss.
+/// Two-second loopable bed: brown noise (the dominant rumble), a thin pink
+/// noise layer (air / texture), and a 50 Hz traction hum, slowly amplitude-
+/// modulated by a 0.7 Hz LFO so the rumble breathes rather than reading as
+/// flat static.
 fn generate_noise_wav() -> Vec<u8> {
     let sr: u32 = 22_050;
     let n = (sr as usize) * 2;
     let mut samples: Vec<i16> = Vec::with_capacity(n);
+
+    // Paul Kellet pink-noise filter state.
     let mut b0 = 0.0_f32;
     let mut b1 = 0.0_f32;
     let mut b2 = 0.0_f32;
+    // Leaky-integrator brown-noise state.
+    let mut brown = 0.0_f32;
+
     let mut rng = fastrand::Rng::with_seed(0xAA_BB_CC_DD);
-    for _ in 0..n {
+    for i in 0..n {
         let w = rng.f32() * 2.0 - 1.0;
+
         b0 = 0.99765 * b0 + w * 0.099_046_0;
         b1 = 0.96300 * b1 + w * 0.296_516_4;
         b2 = 0.57000 * b2 + w * 1.052_691_3;
-        let s = (b0 + b1 + b2 + w * 0.1848) * 0.18;
-        let v = (s * 18_000.0).clamp(-32_767.0, 32_767.0);
+        let pink = (b0 + b1 + b2 + w * 0.1848) * 0.18;
+
+        // Leak 0.985 → ~53 Hz cutoff, giving a sub-bass rumble.
+        brown = brown * 0.985 + w * 0.04;
+
+        let t = i as f32 / sr as f32;
+        let hum = 0.05 * (t * 50.0 * std::f32::consts::TAU).sin();
+        let lfo = 0.85 + 0.15 * (t * 0.7 * std::f32::consts::TAU).sin();
+
+        let s = (brown * 1.5 + pink * 0.30) * lfo + hum;
+
+        let v = (s * 22_000.0).clamp(-32_767.0, 32_767.0);
         samples.push(v as i16);
     }
     pcm_to_wav(&samples, sr)
 }
 
-/// Four-tone horn chord (370 sine + detuned 370 + 466 + 185 octave) with a
-/// 0.12 s soft swell, hold, then exponential-ish decay to silence by 1.35 s.
+/// Four-tone horn chord (370 sine + detuned 370 + 466 + 185 octave) rendered
+/// at constant amplitude with a 5 ms fade at each end so the bevy_audio loop
+/// seam doesn't pop. Played in `PlaybackMode::Loop` for as long as H is held.
 fn generate_horn_wav() -> Vec<u8> {
     let sr: u32 = 22_050;
     let duration = 1.4_f32;
@@ -114,20 +149,19 @@ fn generate_horn_wav() -> Vec<u8> {
         (466.0, 0.30),
         (185.0, 0.50),
     ];
+    let fade = 0.005_f32;
     for i in 0..n {
         let t = i as f32 / sr as f32;
         let mut s = 0.0_f32;
         for &(f, amp) in &freqs {
             s += amp * (t * f * std::f32::consts::TAU).sin();
         }
-        let env = if t < 0.12 {
-            t / 0.12
-        } else if t < 0.8 {
-            1.0
-        } else if t < 1.35 {
-            1.0 - (t - 0.8) / 0.55
+        let env = if t < fade {
+            t / fade
+        } else if t > duration - fade {
+            (duration - t) / fade
         } else {
-            0.0
+            1.0
         };
         let v = s * env * 0.45;
         let clipped = (v * 30_000.0).clamp(-32_767.0, 32_767.0);
