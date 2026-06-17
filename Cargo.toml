@@ -2,7 +2,7 @@
 name = "shinkansen-sim"
 version = "0.1.0"
 edition = "2021"
-description = "E8 Shinkansen Tokyo Drive (Rust/bevy port)"
+description = "E5 Shinkansen Tokyo Drive (Rust/bevy port)"
 
 [dependencies]
 bevy = { version = "0.14", features = ["wav"] }

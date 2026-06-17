@@ -6,7 +6,7 @@ WGS84-projected Tokyo geography sourced from OpenStreetMap (~130k real
 building footprints with real heights, every named arterial, rivers, parks,
 and the Imperial Palace moat). Written in Rust on Bevy 0.14.
 
-Started as a port of `reference/e8-shinkansen-tokyo.html` (a single-file
+Started as a port of `reference/e5-shinkansen-tokyo.html` (a single-file
 Three.js demo) and grew from there. The reference HTML is still in the repo
 for visual comparison.
 
@@ -73,10 +73,15 @@ bbox), and re-run the script.
 
 | Key | Action |
 | --- | --- |
-| W / ↑ | Throttle lever up one notch (max +4) |
-| S / ↓ | Throttle lever down one notch (min −4, brake) |
+| W | Throttle lever up one notch (max +4) |
+| S / Space | Throttle lever down one notch (min −4, brake) |
+| ← / → | Orbit camera left / right |
+| ↑ / ↓ | Pitch camera up / down |
+| Shift + ↑ / ↓ | Zoom out / in |
 | C | Reverse train direction (also flips camera). Only when nearly stopped. |
 | V | Reset camera (orbit + zoom back to chase) |
+| H | Hold to sound the horn |
+| M | Toggle audio mute |
 | E | Step off / board at stations |
 | Mouse drag | Orbit camera |
 | Wheel | Zoom |
@@ -84,8 +89,8 @@ bbox), and re-run the script.
 
 HUD reads e.g. `FORWARD | PWR +3` or `STOPPED REV | BRK −2`.
 
-In walk mode at a station: W/A/S/D move on the platform, mouse drag looks
-around, E re-boards near either nose.
+In walk mode at a station: W/A/S/D move on the platform, arrow keys / mouse
+drag look around, E re-boards near either nose.
 
 ## Project layout
 
@@ -131,7 +136,7 @@ assets/
 └── train.glb            Sketchfab E5 Hayabusa, 3 cars merged
 
 reference/
-└── e8-shinkansen-tokyo.html   original Three.js demo (kept for comparison)
+└── e5-shinkansen-tokyo.html   original Three.js demo (kept for comparison)
 
 tools/
 └── extract_osm.py       Python script that merges Overpass Turbo tile dumps
@@ -215,7 +220,7 @@ Visual/feature gaps reported during playthrough that haven't been addressed:
 
 ## Credits / sources
 
-- Reference Three.js demo: `reference/e8-shinkansen-tokyo.html`.
+- Reference Three.js demo: `reference/e5-shinkansen-tokyo.html`.
 - Train model: Sketchfab E5 Hayabusa, used under the model's license.
 - City data: OpenStreetMap contributors, ODbL.
 - Real Tokyo arterial polylines hand-extracted from Google Maps and OSM.

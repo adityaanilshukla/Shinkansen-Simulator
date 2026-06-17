@@ -115,7 +115,7 @@ fn build_hud(mut commands: Commands) {
     };
 
     commands.spawn(panel).with_children(|p| {
-        p.spawn(TextBundle::from_section("E8 TSUBASA", title_style));
+        p.spawn(TextBundle::from_section("E5 HAYABUSA", title_style));
         p.spawn(NodeBundle {
             style: Style {
                 column_gap: Val::Px(6.0),

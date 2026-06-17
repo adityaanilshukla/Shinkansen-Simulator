@@ -1,4 +1,4 @@
-//! E8 Shinkansen, Tokyo Drive (Rust/bevy port).
+//! E5 Shinkansen, Tokyo Drive (Rust/bevy port).
 //!
 //! This file is just the wiring: window setup, then every plugin in the order
 //! they need to register their resources.
@@ -35,7 +35,7 @@ fn main() {
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "E8 Shinkansen | Tokyo Drive".into(),
+                        title: "E5 Shinkansen | Tokyo Drive".into(),
                         resolution: (1280.0, 800.0).into(),
                         ..default()
                     }),

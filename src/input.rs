@@ -1,9 +1,12 @@
 //! Keyboard and mouse input. No touch controls.
 //!
-//! - `W / Up`: throttle
-//! - `S / Down / Space`: brake (and reverse after stopping)
-//! - `A / D / Left / Right`: nudge orbit yaw
+//! - `W`: throttle lever up one notch
+//! - `S / Space`: throttle lever down one notch (brake)
+//! - `A / D`: walk-mode strafe
+//! - `Arrow keys`: orbit the camera (yaw + pitch). Hold `Shift` + ↑/↓ to zoom.
 //! - `C`: flip view fore/aft
+//! - `V`: reset camera
+//! - `M`: toggle audio mute
 //! - `Esc`: exit
 //! - Drag with the mouse: orbit
 //! - Wheel: zoom
@@ -42,14 +45,63 @@ impl Plugin for InputPlugin {
 }
 
 fn read_keys(
+    time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     mut controls: ResMut<Controls>,
     mut exit: EventWriter<AppExit>,
 ) {
-    controls.forward = keys.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
-    controls.brake = keys.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown, KeyCode::Space]);
-    controls.left = keys.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]);
-    controls.right = keys.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]);
+    // W/A/S/D drive train throttle (handled in physics.rs) and walk-mode
+    // movement (driver.rs). Arrow keys are camera-only.
+    controls.forward = keys.pressed(KeyCode::KeyW);
+    controls.brake = keys.any_pressed([KeyCode::KeyS, KeyCode::Space]);
+    controls.left = keys.pressed(KeyCode::KeyA);
+    controls.right = keys.pressed(KeyCode::KeyD);
+
+    // Arrow keys orbit the camera at a fixed angular rate, matching what the
+    // mouse drag does to `orbit_yaw` / `orbit_pitch`. Holding Shift turns
+    // Up/Down into a zoom in/out instead (same effect as the wheel).
+    let dt = time.delta_seconds().min(0.05);
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let yaw_rate = 1.4;
+    let pitch_rate = 1.0;
+    let zoom_rate = 0.9; // ln(zoom) units per second
+    let mut dyaw = 0.0;
+    let mut dpitch = 0.0;
+    let mut dzoom_log = 0.0;
+    if keys.pressed(KeyCode::ArrowLeft) {
+        dyaw -= yaw_rate * dt;
+    }
+    if keys.pressed(KeyCode::ArrowRight) {
+        dyaw += yaw_rate * dt;
+    }
+    if keys.pressed(KeyCode::ArrowUp) {
+        if shift {
+            dzoom_log += zoom_rate * dt;
+        } else {
+            dpitch += pitch_rate * dt;
+        }
+    }
+    if keys.pressed(KeyCode::ArrowDown) {
+        if shift {
+            dzoom_log -= zoom_rate * dt;
+        } else {
+            dpitch -= pitch_rate * dt;
+        }
+    }
+    if dyaw != 0.0 {
+        controls.orbit_yaw += dyaw;
+        if controls.orbit_yaw > std::f32::consts::PI {
+            controls.orbit_yaw -= std::f32::consts::TAU;
+        } else if controls.orbit_yaw < -std::f32::consts::PI {
+            controls.orbit_yaw += std::f32::consts::TAU;
+        }
+    }
+    if dpitch != 0.0 {
+        controls.orbit_pitch = (controls.orbit_pitch + dpitch).clamp(-0.26, 0.85);
+    }
+    if dzoom_log != 0.0 {
+        controls.zoom = (controls.zoom * dzoom_log.exp()).clamp(0.45, 2.4);
+    }
 
     // V resets the orbit / zoom to the default chase view.
     if keys.just_pressed(KeyCode::KeyV) {

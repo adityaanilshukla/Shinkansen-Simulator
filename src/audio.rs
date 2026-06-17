@@ -9,7 +9,16 @@
 use bevy::audio::{AudioSink, PlaybackMode, Volume};
 use bevy::prelude::*;
 
+use crate::input::Controls;
 use crate::physics::{TrainState, V_MAX};
+
+/// Maps `Controls.zoom` (0.45..=2.4, smaller = closer) to a 1/x volume factor:
+/// closer camera → louder, further camera → quieter. Capped at 1.0 so even
+/// cab-close view never blows out the mix, and floored so far-out audio is
+/// faint rather than silent.
+fn zoom_volume_factor(zoom: f32) -> f32 {
+    (0.7 / zoom.max(0.1)).clamp(0.12, 1.0)
+}
 
 #[derive(Component)]
 struct RunningBed;
@@ -20,12 +29,38 @@ struct HornVoice;
 #[derive(Resource)]
 struct HornHandle(Handle<AudioSource>);
 
+/// Master mute. Toggled by the player with M; while true every sink in the
+/// scene is silenced and the horn refuses to spawn.
+#[derive(Resource, Default)]
+pub struct AudioMute(pub bool);
+
 pub struct AudioPlugin;
 
 impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_audio)
-            .add_systems(Update, (update_bed, drive_horn));
+        app.init_resource::<AudioMute>()
+            .add_systems(Startup, setup_audio)
+            .add_systems(
+                Update,
+                (toggle_mute, update_bed, drive_horn, update_horn_volume),
+            );
+    }
+}
+
+fn toggle_mute(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut mute: ResMut<AudioMute>,
+    horn_voices: Query<&AudioSink, With<HornVoice>>,
+) {
+    if keys.just_pressed(KeyCode::KeyM) {
+        mute.0 = !mute.0;
+        // Snap any currently-sounding horn voice off immediately; the bed gets
+        // re-set every frame by `update_bed` so it doesn't need a nudge.
+        if mute.0 {
+            for sink in &horn_voices {
+                sink.set_volume(0.0);
+            }
+        }
     }
 }
 
@@ -56,15 +91,28 @@ fn setup_audio(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
     commands.insert_resource(HornHandle(horn_handle));
 }
 
-fn update_bed(state: Res<TrainState>, sinks: Query<&AudioSink, With<RunningBed>>) {
+fn update_bed(
+    state: Res<TrainState>,
+    mute: Res<AudioMute>,
+    controls: Res<Controls>,
+    sinks: Query<&AudioSink, With<RunningBed>>,
+) {
     let Ok(sink) = sinks.get_single() else {
         return;
     };
+    if mute.0 {
+        sink.set_volume(0.0);
+        return;
+    }
     let frac = (state.speed.abs() / V_MAX).clamp(0.0, 1.0);
-    // Always-on quiet idle rumble; swells with speed. Pitch stays nearly
-    // constant so the texture reads as the same train running faster, not
-    // as a chipmunk-on-rails.
-    sink.set_volume(0.08 + frac * 0.34);
+    // Quiet idle rumble that swells with speed and with how close the camera
+    // is to the train. Pitch stays nearly constant so the texture reads as the
+    // same train running faster, not as a chipmunk-on-rails.
+    // Sized so that even at cab-close zoom (`zoom_volume_factor` = 1.0) the
+    // bed maxes out at roughly what the previous tuning produced when fully
+    // zoomed out. The player asked for that level to be the loudest possible.
+    let base_vol = 0.0035 + frac * 0.018;
+    sink.set_volume(base_vol * zoom_volume_factor(controls.zoom));
     sink.set_speed(0.92 + frac * 0.18);
 }
 
@@ -72,15 +120,18 @@ fn drive_horn(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     horn: Res<HornHandle>,
+    mute: Res<AudioMute>,
     voices: Query<Entity, With<HornVoice>>,
 ) {
-    if keys.just_pressed(KeyCode::KeyH) {
+    if keys.just_pressed(KeyCode::KeyH) && !mute.0 {
         commands.spawn((
             AudioBundle {
                 source: horn.0.clone(),
                 settings: PlaybackSettings {
                     mode: PlaybackMode::Loop,
-                    volume: Volume::new(0.7),
+                    // Spawn quiet; `update_horn_volume` retunes it on the next
+                    // frame based on zoom. Prevents a half-frame pop on press.
+                    volume: Volume::new(0.02),
                     speed: 1.0,
                     ..default()
                 },
@@ -92,6 +143,16 @@ fn drive_horn(
         for entity in &voices {
             commands.entity(entity).despawn();
         }
+    }
+}
+
+/// Hold the horn at a flat, low playback volume regardless of zoom. The
+/// player asked for a constant level, so the horn doesn't look at
+/// `Controls.zoom` at all.
+fn update_horn_volume(mute: Res<AudioMute>, sinks: Query<&AudioSink, With<HornVoice>>) {
+    let vol = if mute.0 { 0.0 } else { 0.03 };
+    for sink in &sinks {
+        sink.set_volume(vol);
     }
 }
 
@@ -135,35 +196,36 @@ fn generate_noise_wav() -> Vec<u8> {
     pcm_to_wav(&samples, sr)
 }
 
-/// Four-tone horn chord (370 sine + detuned 370 + 466 + 185 octave) rendered
-/// at constant amplitude with a 5 ms fade at each end so the bevy_audio loop
-/// seam doesn't pop. Played in `PlaybackMode::Loop` for as long as H is held.
+/// Four-tone horn chord (185 + detuned 185.5 + 233 + 92.5 sub-octave),
+/// dropped a full octave below the original Three.js demo so the horn reads
+/// as a deep warning sound.
+///
+/// Every frequency here is chosen so that `f * duration` is an integer with
+/// `duration = 2.0 s`. That means each sine completes a whole number of
+/// cycles in the clip, sample[0] and the natural next-sample after sample[n]
+/// share the same phase, and `PlaybackMode::Loop` produces a continuous
+/// drone with no audible seam. No fade is applied for that same reason -
+/// fading was what made the loop boundary audible as a pulse before.
 fn generate_horn_wav() -> Vec<u8> {
     let sr: u32 = 22_050;
-    let duration = 1.4_f32;
+    let duration = 2.0_f32;
     let n = (sr as f32 * duration) as usize;
     let mut samples: Vec<i16> = Vec::with_capacity(n);
+    // 185.0 * 2.0 = 370, 185.5 * 2.0 = 371, 233.0 * 2.0 = 466,
+    // 92.5 * 2.0 = 185 — all integer cycles per loop.
     let freqs: [(f32, f32); 4] = [
-        (370.0, 0.30),
-        (370.5, 0.30),
-        (466.0, 0.30),
-        (185.0, 0.50),
+        (185.0, 0.30),
+        (185.5, 0.30),
+        (233.0, 0.28),
+        (92.5, 0.55),
     ];
-    let fade = 0.005_f32;
     for i in 0..n {
         let t = i as f32 / sr as f32;
         let mut s = 0.0_f32;
         for &(f, amp) in &freqs {
             s += amp * (t * f * std::f32::consts::TAU).sin();
         }
-        let env = if t < fade {
-            t / fade
-        } else if t > duration - fade {
-            (duration - t) / fade
-        } else {
-            1.0
-        };
-        let v = s * env * 0.45;
+        let v = s * 0.45;
         let clipped = (v * 30_000.0).clamp(-32_767.0, 32_767.0);
         samples.push(clipped as i16);
     }

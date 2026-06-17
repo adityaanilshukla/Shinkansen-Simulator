@@ -9,8 +9,8 @@ use crate::driver::GameMode;
 use crate::route::Route;
 use crate::train::MODEL_HALF_LENGTH;
 
-/// 300 km/h, the E8 service maximum.
-pub const V_MAX: f32 = 300.0 / 3.6;
+/// 320 km/h, the E5 Hayabusa service maximum on the Tohoku Shinkansen.
+pub const V_MAX: f32 = 320.0 / 3.6;
 
 const ACCEL: f32 = 6.2;
 const BRAKE: f32 = 7.5;
@@ -79,11 +79,12 @@ fn step_physics(
     }
     let dt = time.delta_seconds().min(0.05);
 
-    // Throttle lever: W/Up steps the notch up, S/Down steps it down.
-    if keys.just_pressed(KeyCode::KeyW) || keys.just_pressed(KeyCode::ArrowUp) {
+    // Throttle lever: W steps the notch up, S steps it down. Arrow keys are
+    // reserved for camera orbit.
+    if keys.just_pressed(KeyCode::KeyW) {
         state.throttle_level = (state.throttle_level + 1).min(THROTTLE_NOTCHES);
     }
-    if keys.just_pressed(KeyCode::KeyS) || keys.just_pressed(KeyCode::ArrowDown) {
+    if keys.just_pressed(KeyCode::KeyS) {
         state.throttle_level = (state.throttle_level - 1).max(-THROTTLE_NOTCHES);
     }
 
