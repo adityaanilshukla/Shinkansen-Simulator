@@ -4,6 +4,7 @@ use bevy::prelude::*;
 
 use crate::driver::{GameMode, NearAction};
 use crate::physics::{TrainState, V_MAX};
+use crate::stations::Stations;
 
 #[derive(Component)]
 struct SpeedReadout;
@@ -16,6 +17,9 @@ struct BarFill;
 
 #[derive(Component)]
 struct ActionPrompt;
+
+#[derive(Component)]
+struct NextStationReadout;
 
 pub struct HudPlugin;
 
@@ -163,13 +167,47 @@ fn build_hud(mut commands: Commands) {
             TextBundle::from_section("STOPPED", dir_style),
             DirReadout,
         ));
+        p.spawn((
+            TextBundle::from_section(
+                "",
+                TextStyle {
+                    font_size: 12.0,
+                    color: Color::srgb(0.78, 0.83, 0.95),
+                    ..default()
+                },
+            ),
+            NextStationReadout,
+        ));
     });
 }
 
 fn update_hud(
     state: Res<TrainState>,
-    mut speed_q: Query<&mut Text, (With<SpeedReadout>, Without<DirReadout>)>,
-    mut dir_q: Query<&mut Text, (With<DirReadout>, Without<SpeedReadout>)>,
+    stations: Res<Stations>,
+    mut speed_q: Query<
+        &mut Text,
+        (
+            With<SpeedReadout>,
+            Without<DirReadout>,
+            Without<NextStationReadout>,
+        ),
+    >,
+    mut dir_q: Query<
+        &mut Text,
+        (
+            With<DirReadout>,
+            Without<SpeedReadout>,
+            Without<NextStationReadout>,
+        ),
+    >,
+    mut next_q: Query<
+        &mut Text,
+        (
+            With<NextStationReadout>,
+            Without<SpeedReadout>,
+            Without<DirReadout>,
+        ),
+    >,
     mut bar_q: Query<&mut Style, With<BarFill>>,
 ) {
     let kmh = (state.speed.abs() * 3.6).round() as i32;
@@ -197,8 +235,54 @@ fn update_hud(
             section.value = format!("{}  |  {}", dir, lever);
         }
     }
+    if let Ok(mut t) = next_q.get_single_mut() {
+        if let Some(section) = t.sections.get_mut(0) {
+            section.value = next_station_text(&stations, state.dist, state.forward_dir);
+        }
+    }
     if let Ok(mut s) = bar_q.get_single_mut() {
         let frac = (state.speed.abs() / V_MAX).clamp(0.0, 1.0);
         s.width = Val::Px(118.0 * frac);
+    }
+}
+
+/// Decides the panel string from the train's arc-distance and travel
+/// direction:
+///
+/// - `AT <name>` when the train arrow is at-or-just-past the station marker
+///   (signed distance in travel direction is in `(-PAST_THRESHOLD, 0]`).
+/// - `TO <name>  ·  X km` for the nearest station ahead otherwise.
+/// - `END OF LINE` when there's nothing further in front.
+fn next_station_text(stations: &Stations, dist: f32, forward_dir: f32) -> String {
+    /// How far past a station's centre we keep showing `AT` before flipping
+    /// to `TO next`. Roughly one platform length, so the status reads "AT
+    /// TOKYO" for the full duration the train is alongside the platform.
+    const PAST_THRESHOLD: f32 = 100.0;
+    let dir = if forward_dir >= 0.0 { 1.0 } else { -1.0 };
+
+    // Did we just cross (or are sitting at) any station centre?
+    for s in &stations.list {
+        let signed = (s.dist - dist) * dir;
+        if signed <= 0.0 && signed > -PAST_THRESHOLD {
+            return format!("AT {}", s.name);
+        }
+    }
+
+    // Otherwise, nearest station strictly ahead in the travel direction.
+    let mut best: Option<(&'static str, f32)> = None;
+    for s in &stations.list {
+        let signed = (s.dist - dist) * dir;
+        if signed <= 0.0 {
+            continue;
+        }
+        match best {
+            Some((_, b)) if signed >= b => {}
+            _ => best = Some((s.name, signed)),
+        }
+    }
+    match best {
+        Some((name, d)) if d >= 1000.0 => format!("TO {}   {:.1} km", name, d / 1000.0),
+        Some((name, d)) => format!("TO {}   {:.0} m", name, d),
+        None => "END OF LINE".to_string(),
     }
 }
