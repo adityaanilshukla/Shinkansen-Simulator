@@ -20,7 +20,7 @@ pub struct MotionPlugin;
 
 impl Plugin for MotionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, follow_curve);
+        app.add_systems(Update, follow_curve.in_set(crate::SimStage::Motion));
     }
 }
 

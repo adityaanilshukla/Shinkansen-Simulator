@@ -29,6 +29,18 @@ mod water;
 
 use bevy::prelude::*;
 
+/// Frame order for the simulation pipeline. Physics writes `TrainState.dist`,
+/// motion uses it to place the train cars, and camera reads the resulting
+/// transforms to follow them. Without this chain, Bevy is free to interleave
+/// the three systems each frame and the camera sometimes ends up reading
+/// stale car transforms — visible as jitter at high speed.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SimStage {
+    Physics,
+    Motion,
+    Camera,
+}
+
 fn main() {
     App::new()
         .add_plugins(
@@ -76,5 +88,9 @@ fn main() {
             minimap::MinimapPlugin,
             audio::AudioPlugin,
         ))
+        .configure_sets(
+            Update,
+            (SimStage::Physics, SimStage::Motion, SimStage::Camera).chain(),
+        )
         .run();
 }
