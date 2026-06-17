@@ -43,6 +43,29 @@ impl Spline {
         cubic_derivative(p0, p1, p2, p3, u, self.tension).normalize_or_zero()
     }
 
+    /// Map a parameter t in [0, 1] to the cumulative arc length up to that
+    /// point. Necessary because Catmull-Rom's t-parameterisation isn't
+    /// uniform with arc length — `t * length()` is wildly wrong on curves
+    /// with uneven control-point spacing (it claimed Tokyo Station was
+    /// thousands of metres further along the route than it actually is).
+    pub fn distance_at_t(&self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        let mut lo = 0usize;
+        let mut hi = self.arc.len() - 1;
+        while hi - lo > 1 {
+            let mid = (lo + hi) / 2;
+            if self.arc[mid].0 < t {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let (t0, d0) = self.arc[lo];
+        let (t1, d1) = self.arc[hi];
+        let span = (t1 - t0).max(1e-6);
+        d0 + (d1 - d0) * ((t - t0) / span)
+    }
+
     /// Map a distance along the curve to the parameter t in [0, 1].
     pub fn t_at_distance(&self, dist: f32) -> f32 {
         let d = dist.clamp(0.0, self.length);

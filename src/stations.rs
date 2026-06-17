@@ -27,6 +27,7 @@ pub struct StationInfo {
     pub pos: Vec3,
     pub tangent: Vec3,
     pub normal: Vec3,
+    pub name: &'static str,
 }
 
 #[derive(Resource, Default)]
@@ -43,7 +44,7 @@ impl Plugin for StationsPlugin {
     }
 }
 
-fn spawn_stations(
+pub fn spawn_stations(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -98,20 +99,21 @@ fn spawn_stations(
         half_height: 2.05,
     });
 
-    for &(lat, lon, _name) in STATIONS {
+    for &(lat, lon, name) in STATIONS {
         let g = geo(lat, lon);
         let t = find_t_near(&route, g.x, g.z);
         let p = route.spline.position(t);
         let tan = route.spline.tangent(t);
         let nor = Vec3::new(tan.z, 0.0, -tan.x).normalize_or_zero();
 
-        let dist = arc_distance(&route, t);
+        let dist = route.spline.distance_at_t(t);
         stations.list.push(StationInfo {
             t,
             dist,
             pos: p,
             tangent: tan,
             normal: nor,
+            name,
         });
 
         for side in [-1.0_f32, 1.0_f32] {
@@ -203,8 +205,3 @@ fn find_t_near(route: &Route, x: f32, z: f32) -> f32 {
     best_t
 }
 
-fn arc_distance(route: &Route, t: f32) -> f32 {
-    // Coarse: just t * length. The spline has uniform sample arc table so this
-    // is close enough for the station HUD checks.
-    t * route.spline.length()
-}
