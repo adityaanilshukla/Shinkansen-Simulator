@@ -1,156 +1,126 @@
 //! Three identifiable Tokyo landmarks: Tokyo Tower, Skytree, Mt. Fuji.
 //!
-//! These are stylised: a stack of cones/cylinders rather than accurate
-//! lattice models. They sit at the real WGS84 positions so they line up with
-//! the rest of the world.
+//! Tokyo Tower and Skytree are real GLBs loaded from `assets/`, auto-
+//! rescaled at startup to match their real-world heights; Fuji is still a
+//! stylised cone pair. All three sit at their real WGS84 positions so they
+//! line up with the rest of the world.
 
 use bevy::prelude::*;
+use bevy::render::primitives::Aabb;
 
 use crate::geo::geo;
+
+/// Tag attached to a freshly-spawned landmark GLB. Carries the real-world
+/// total height in metres; `rescale_landmark` measures the loaded model's
+/// vertical extent, scales to hit that height, drops the base onto y=0, and
+/// then removes the tag.
+#[derive(Component)]
+struct AutoRescaleHeight(f32);
 
 pub struct LandmarksPlugin;
 
 impl Plugin for LandmarksPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (spawn_tokyo_tower, spawn_skytree, spawn_fuji));
+        app.add_systems(Startup, (spawn_tokyo_tower, spawn_skytree, spawn_fuji))
+            .add_systems(Update, rescale_landmark);
     }
 }
 
-fn spawn_tokyo_tower(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn spawn_tokyo_tower(mut commands: Commands, asset_server: Res<AssetServer>) {
     let pos = geo(35.6586, 139.7454);
-    let red = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.84, 0.32, 0.18),
-        perceptual_roughness: 0.6,
-        metallic: 0.3,
-        ..default()
-    });
-    let cream = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.91, 0.89, 0.85),
-        perceptual_roughness: 0.7,
-        ..default()
-    });
-
-    let scale = 1.36;
-    let group = commands
-        .spawn((
-            SpatialBundle::from_transform(
-                Transform::from_xyz(pos.x, 0.0, pos.z).with_scale(Vec3::splat(scale)),
-            ),
-        ))
-        .id();
-
-    let lower = commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Cylinder::new(20.0, 65.0)),
-            material: red.clone(),
-            transform: Transform::from_xyz(0.0, 65.0, 0.0),
+    commands.spawn((
+        SceneBundle {
+            scene: asset_server.load("tokyo_tower.glb#Scene0"),
+            transform: Transform::from_xyz(pos.x, 0.0, pos.z),
             ..default()
-        })
-        .id();
-    let deck1 = commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Cylinder::new(10.0, 3.5)),
-            material: cream.clone(),
-            transform: Transform::from_xyz(0.0, 124.0, 0.0),
-            ..default()
-        })
-        .id();
-    let upper = commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Cylinder::new(5.0, 40.0)),
-            material: red.clone(),
-            transform: Transform::from_xyz(0.0, 168.0, 0.0),
-            ..default()
-        })
-        .id();
-    let deck2 = commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Cylinder::new(4.6, 2.5)),
-            material: cream,
-            transform: Transform::from_xyz(0.0, 205.0, 0.0),
-            ..default()
-        })
-        .id();
-    let antenna = commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Cylinder::new(0.7, 19.0)),
-            material: red,
-            transform: Transform::from_xyz(0.0, 226.0, 0.0),
-            ..default()
-        })
-        .id();
-
-    commands
-        .entity(group)
-        .push_children(&[lower, deck1, upper, deck2, antenna]);
+        },
+        // Real-world Tokyo Tower height including the antenna mast.
+        AutoRescaleHeight(333.0),
+    ));
 }
 
-fn spawn_skytree(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn spawn_skytree(mut commands: Commands, asset_server: Res<AssetServer>) {
     let pos = geo(35.7101, 139.8107);
-    let shaft = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.84, 0.87, 0.89),
-        perceptual_roughness: 0.6,
-        metallic: 0.3,
-        ..default()
-    });
-    let deck = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.94, 0.95, 0.96),
-        perceptual_roughness: 0.5,
-        metallic: 0.2,
-        ..default()
-    });
+    commands.spawn((
+        SceneBundle {
+            scene: asset_server.load("tokyo_skytree.glb#Scene0"),
+            transform: Transform::from_xyz(pos.x, 0.0, pos.z),
+            ..default()
+        },
+        AutoRescaleHeight(634.0),
+    ));
+}
 
-    let scale = 1.62;
-    let group = commands
-        .spawn(SpatialBundle::from_transform(
-            Transform::from_xyz(pos.x, 0.0, pos.z).with_scale(Vec3::splat(scale)),
-        ))
-        .id();
+/// Walks each tagged landmark's scene hierarchy and unions every mesh's
+/// world-space Aabb (because the GLB hierarchy can stack arbitrary
+/// translations between the root and any single mesh — we can't just look
+/// at one mesh's local Aabb). Once the model is loaded, picks a uniform
+/// scale that maps the union's height to the tag's target metres, shifts
+/// the root so the base lands on y=0, and removes the tag.
+fn rescale_landmark(
+    mut commands: Commands,
+    leaves: Query<(&Aabb, &GlobalTransform)>,
+    children: Query<&Children>,
+    mut roots: Query<(Entity, &mut Transform, &AutoRescaleHeight)>,
+) {
+    for (root, mut transform, target) in &mut roots {
+        let mut min_y = f32::INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        let mut count = 0;
+        collect_world_y(root, &leaves, &children, &mut min_y, &mut max_y, &mut count);
+        if count == 0 {
+            // Scene mesh entities aren't ready yet; try again next frame.
+            continue;
+        }
+        let model_height = max_y - min_y;
+        if model_height <= 0.001 {
+            continue;
+        }
+        let s = target.0 / model_height;
+        transform.scale = Vec3::splat(s);
+        // The world Y measurements above were taken with the root at
+        // (pos.x, 0, pos.z) and scale=1, so they match root-local Y. After
+        // multiplying everything by s around the root's origin, the lowest
+        // vertex sits at s * min_y; shift the root up by -s * min_y so it
+        // hits exactly y=0.
+        transform.translation.y = -s * min_y;
+        commands.entity(root).remove::<AutoRescaleHeight>();
+    }
+}
 
-    let main = commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Cylinder::new(13.0, 150.0)),
-            material: shaft.clone(),
-            transform: Transform::from_xyz(0.0, 150.0, 0.0),
-            ..default()
-        })
-        .id();
-    let d1 = commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Cylinder::new(13.0, 4.5)),
-            material: deck.clone(),
-            transform: Transform::from_xyz(0.0, 206.0, 0.0),
-            ..default()
-        })
-        .id();
-    let d2 = commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Cylinder::new(9.0, 4.5)),
-            material: deck,
-            transform: Transform::from_xyz(0.0, 268.0, 0.0),
-            ..default()
-        })
-        .id();
-    let spire = commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Cylinder::new(1.3, 45.0)),
-            material: shaft,
-            transform: Transform::from_xyz(0.0, 345.0, 0.0),
-            ..default()
-        })
-        .id();
-
-    commands
-        .entity(group)
-        .push_children(&[main, d1, d2, spire]);
+fn collect_world_y(
+    entity: Entity,
+    leaves: &Query<(&Aabb, &GlobalTransform)>,
+    children: &Query<&Children>,
+    min_y: &mut f32,
+    max_y: &mut f32,
+    count: &mut usize,
+) {
+    if let Ok((aabb, gt)) = leaves.get(entity) {
+        let affine = gt.affine();
+        let cx = aabb.center.x;
+        let cy = aabb.center.y;
+        let cz = aabb.center.z;
+        let hx = aabb.half_extents.x;
+        let hy = aabb.half_extents.y;
+        let hz = aabb.half_extents.z;
+        for sx in [-1.0_f32, 1.0] {
+            for sy in [-1.0_f32, 1.0] {
+                for sz in [-1.0_f32, 1.0] {
+                    let local = Vec3::new(cx + sx * hx, cy + sy * hy, cz + sz * hz);
+                    let world = affine.transform_point3(local);
+                    *min_y = min_y.min(world.y);
+                    *max_y = max_y.max(world.y);
+                    *count += 1;
+                }
+            }
+        }
+    }
+    if let Ok(kids) = children.get(entity) {
+        for &c in kids.iter() {
+            collect_world_y(c, leaves, children, min_y, max_y, count);
+        }
+    }
 }
 
 fn spawn_fuji(
